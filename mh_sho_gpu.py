@@ -38,7 +38,7 @@ mf = cl.mem_flags
 
 prg = cl.Program(ctx, replace_vars("""
 __kernel void sweep(
-    __global const float *deltas_g, __global const float *probs_g, __global float *u_global_g)
+    __global const float *deltas_g, __global const float *probs_g, __global float *u_global_g, __global int *acceptance_rate_g)
 {
     // initialize variables
     int gid = get_global_id(0); // each gid will get its own u to play with - these will be added up later
@@ -56,6 +56,7 @@ __kernel void sweep(
             // compute dS and accept?
             dS = delta * (delta + 2 * u_global_g[u_I] - {{VAR_G}} * (u_global_g[u_I-1] + u_global_g[u_I+1]));
             accept = probs_g[I] < exp(-dS);
+            acceptance_rate_g[gid] += accept;
           
             // replace value in u, sequentially as we go, for all the sweeps
             u_global_g[u_I] += accept*delta;
@@ -75,8 +76,8 @@ __kernel void sweep(
 
 # OBSERVATIONS =========================
 u = np.empty((MONTE_CARLO_WORKER_COUNT, N), dtype=np.float32)
-u_global_g = cl.Buffer(ctx, mf.READ_ONLY, u.nbytes)
-DELTA = 1.5
+u_global_g = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=u)
+DELTA = 1.8
 OBS = []
 
 for n in range(MONTE_CARLO_N_ROUNDS):
@@ -85,19 +86,46 @@ for n in range(MONTE_CARLO_N_ROUNDS):
 
     deltas = 2 * DELTA * (np.random.random(SHAPE) - 0.5).astype(np.float32)
     probs = np.random.random(SHAPE).astype(np.float32)
+    acceptance_rate = np.zeros(MONTE_CARLO_WORKER_COUNT, dtype=np.int32)
     #deltas_g = pyopencl.array.to_device(ctx, deltas)
     #probs_g = pyopencl.array.to_device(ctx, probs)
     deltas_g = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=deltas)
     probs_g = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=probs)
+    acceptance_rate_g = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=acceptance_rate)
 
-    print(f"Total memory transfer: {round((deltas_g.size + probs_g.size + u_global_g.size)/1000000, 2)} MB")
+    print(f"Total memory transfer: {round((deltas_g.size + probs_g.size + u_global_g.size + acceptance_rate_g.size)/1000000, 2)} MB")
 
-    prg.sweep(queue, (MONTE_CARLO_WORKER_COUNT,), None, deltas_g, probs_g, u_global_g)
+    prg.sweep(queue, (MONTE_CARLO_WORKER_COUNT,), None, deltas_g, probs_g, u_global_g, acceptance_rate_g)
 
     deltas_g.release()
     probs_g.release()
     cl.enqueue_copy(queue, u, u_global_g)
+    cl.enqueue_copy(queue, acceptance_rate, acceptance_rate_g)
+
+    print('Mean acceptance rate:', np.round(np.mean(acceptance_rate).astype(float)/N/N_SWEEPS, 2))
+
+    #f, pl = plot.subplots(4, 1)
+    #i = 0
+
     for U in u:
+        #OBS.append(U[time(4.0):time(5.1)])
+        """
+        pl[i].plot(np.linspace(0, SIZE, N), U)
+        plot.xlabel('t')
+        pl[i].set_ylabel('x')
+        if i != 3:
+            pl[i].tick_params(
+                axis='x',          # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                bottom=False,      # ticks along the bottom edge are off
+                top=False,         # ticks along the top edge are off
+                labelbottom=False)
+        pl[i].set_ylim([-5, 5])
+        i += 1
+        if i == 4:
+            plot.show()
+            exit()
+        """
         OBS.append(U[time(4.95)]*U[time(4.95):time(5.1)])
 
 print(f'Done! N={len(OBS)} observations collected')

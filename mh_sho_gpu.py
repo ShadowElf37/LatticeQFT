@@ -77,7 +77,7 @@ __kernel void sweep(
 # OBSERVATIONS =========================
 u = np.empty((MONTE_CARLO_WORKER_COUNT, N), dtype=np.float32)
 u_global_g = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=u)
-DELTA = 1.8
+DELTA = 1.5
 OBS = []
 
 for n in range(MONTE_CARLO_N_ROUNDS):

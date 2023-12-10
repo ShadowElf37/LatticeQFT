@@ -62,7 +62,6 @@ mu_g = cl_array.empty(queue, PHI_SHAPE, dtype=np.float32)
 DELTA = 1.1
 
 rng_g = cl_random.PhiloxGenerator(ctx)
-rng = np.random.Generator
 
 input(f'Expected GPU memory usage {round((deltas_g.nbytes + probs_g.nbytes + mu_g.nbytes + phi_global.nbytes + 4*MONTE_CARLO_N_ROUNDS)/1000000000, 3)} GB. Press enter to start.')
 
